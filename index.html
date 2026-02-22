@@ -302,6 +302,7 @@
     // ===== ROLE SELECTION =====
     window.selectRole = function(r) {
       role = r;
+      messagesLoaded = false;
       document.getElementById("roleSelect").style.display = "none";
       document.getElementById("messages").style.display = "block";
       document.getElementById("inputArea").style.display = "flex";
@@ -309,36 +310,52 @@
 
       // ===== PRESENCE: Set online & handle disconnect =====
       const myPresenceRef = ref(db, "presence/" + role);
+      // Use a special Firebase trick: write offline state with server timestamp on disconnect FIRST
+      onDisconnect(myPresenceRef).update({ online: false, lastSeen: Date.now() });
+      // Then set online
       set(myPresenceRef, { online: true, lastSeen: Date.now() });
-      onDisconnect(myPresenceRef).set({ online: false, lastSeen: Date.now() });
+
+      // Update lastSeen every 30s while online (so disconnect timestamp is fresh)
+      setInterval(() => {
+        onDisconnect(myPresenceRef).update({ online: false, lastSeen: Date.now() });
+      }, 30000);
 
       // ===== LISTEN TO OTHER PERSON'S PRESENCE =====
       const other = role === 'husband' ? 'wife' : 'husband';
       const otherName = role === 'husband' ? 'Wifey' : 'Hubby';
       const otherPresenceRef = ref(db, "presence/" + other);
+      let lastSeenInterval = null;
+
       onValue(otherPresenceRef, (snap) => {
         const data = snap.val();
         const statusEl = document.getElementById("onlineStatus");
+        if (lastSeenInterval) { clearInterval(lastSeenInterval); lastSeenInterval = null; }
+
         if (!data) { statusEl.textContent = ""; statusEl.className = ""; return; }
+
         if (data.online) {
           statusEl.textContent = otherName + " is online";
           statusEl.className = "online";
         } else if (data.lastSeen) {
-          const mins = Math.floor((Date.now() - data.lastSeen) / 60000);
-          if (mins < 1) statusEl.textContent = otherName + " last seen just now";
-          else if (mins < 60) statusEl.textContent = otherName + " last seen " + mins + " min ago";
-          else {
-            const hrs = Math.floor(mins / 60);
-            statusEl.textContent = otherName + " last seen " + hrs + " hr ago";
+          function formatLastSeen(ts) {
+            const now = Date.now();
+            const mins = Math.floor((now - ts) / 60000);
+            if (mins < 1) return otherName + " last seen just now";
+            if (mins < 60) return otherName + " last seen " + mins + " min ago";
+            // Show actual time for today
+            const d = new Date(ts);
+            const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+            const today = new Date();
+            if (d.toDateString() === today.toDateString()) {
+              return otherName + " last seen today at " + timeStr;
+            }
+            return otherName + " last seen " + d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + " at " + timeStr;
           }
+          statusEl.textContent = formatLastSeen(data.lastSeen);
           statusEl.className = "";
-          // Keep updating the "last seen X min ago" every minute
-          setInterval(() => {
-            const m = Math.floor((Date.now() - data.lastSeen) / 60000);
-            if (m < 1) statusEl.textContent = otherName + " last seen just now";
-            else if (m < 60) statusEl.textContent = otherName + " last seen " + m + " min ago";
-            else statusEl.textContent = otherName + " last seen " + Math.floor(m/60) + " hr ago";
-          }, 60000);
+          lastSeenInterval = setInterval(() => {
+            statusEl.textContent = formatLastSeen(data.lastSeen);
+          }, 30000);
         }
       });
 
@@ -373,6 +390,9 @@
       
       // Mark all existing messages as seen
       markExistingMessagesAsSeen();
+
+      // Load messages
+      loadMessages();
     };
 
     // ===== MARK EXISTING MESSAGES AS SEEN =====
@@ -628,19 +648,36 @@
       msgBox.scrollTop = msgBox.scrollHeight;
     }
 
-    // Load messages
-    onChildAdded(chatRef, (snapshot) => {
-      const msg = snapshot.val();
-      const key = snapshot.key;
-      renderMsg(key, msg);
-      
-      // Mark message as seen if it's from the other person
-      if (msg.sender !== role) {
-        const updates = {};
-        updates[`seenBy/${role}`] = true;
-        update(ref(db, "chat/" + key), updates);
+    // ===== LOAD MESSAGES: Existing all at once, then new ones live =====
+    let messagesLoaded = false;
+
+    async function loadMessages() {
+      // 1. Load ALL existing messages at once (instant, no trickle)
+      const snapshot = await get(chatRef);
+      if (snapshot.exists()) {
+        snapshot.forEach((child) => {
+          renderMsg(child.key, child.val());
+          // Mark as seen if from other person
+          if (child.val().sender !== role) {
+            update(ref(db, "chat/" + child.key), { ["seenBy/" + role]: true });
+          }
+        });
       }
-    });
+      messagesLoaded = true;
+
+      // 2. After loading history, listen ONLY for brand new messages
+      onChildAdded(chatRef, (snap) => {
+        if (!messagesLoaded) return; // skip — already rendered above
+        const msg = snap.val();
+        const key = snap.key;
+        if (!document.getElementById("msg-" + key)) {
+          renderMsg(key, msg);
+          if (msg.sender !== role) {
+            update(ref(db, "chat/" + key), { ["seenBy/" + role]: true });
+          }
+        }
+      });
+    }
 
     // Delete message
     window.deleteMsg = function(key) {
