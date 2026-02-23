@@ -34,7 +34,8 @@
   }
 
   #chatCard {
-  display: none;
+  display: flex;
+  flex-direction: column;
   position: fixed;
   bottom: 70px;
   left: 15px;
@@ -43,12 +44,13 @@
   background: #000;
   border-radius: 10px;
   box-shadow: 0 4px 10px rgba(0,0,0,0.6);
-  display: flex;
-  flex-direction: column;
   font-size: 11px;
   color: white;
-  transition: transform 0.1s ease; /* Smooth zoom */
-  z-index: 1000; /* Keep on top when zoomed */
+  transition: transform 0.1s ease;
+  z-index: 1000;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
   }
 
   #chatHeader {
@@ -114,6 +116,32 @@
     font-style: italic;
   }
 
+  #uploadProgress {
+    display: none;
+    padding: 3px 6px;
+    background: #111;
+    border-top: 1px solid #333;
+  }
+  #uploadProgressBar {
+    height: 4px;
+    background: #444;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  #uploadProgressFill {
+    height: 100%;
+    width: 0%;
+    background: lightgreen;
+    border-radius: 2px;
+    transition: width 0.2s ease;
+  }
+  #uploadProgressText {
+    font-size: 8px;
+    color: #aaa;
+    text-align: center;
+    margin-top: 2px;
+  }
+
   #onlineStatus {
     font-size: 9px;
     color: #aaa;
@@ -160,7 +188,6 @@
     box-sizing: border-box;
   }
 
-  /* Send controls area */
   #sendControls { 
     display: flex; 
     justify-content: flex-end; 
@@ -169,7 +196,6 @@
     align-items: center;
   }
   
-  /* Bell button styling - Same size as photo/video buttons */
   #notifyButton {
     background: transparent;
     color: white;
@@ -197,8 +223,7 @@
     transform: none;
   }
 
-  /* Photo/video/send buttons - All same size */
-  #imgBtn, #vidBtn, #sendBtn {
+  #imgBtn, #vidBtn, #audioBtn, #sendBtn {
     padding: 3px;
     background: #000;
     color: white;
@@ -213,13 +238,11 @@
     cursor: pointer;
   }
 
-  /* Send button slightly wider */
   #sendBtn {
     width: 45px;
     padding: 3px 8px;
   }
 
-  /* Container for all buttons in input area */
   .input-buttons {
     display: flex;
     align-items: center;
@@ -247,39 +270,46 @@
     <div id="messages" style="display:none;"></div>
     
     <div id="typingIndicator"></div>
+    <div id="uploadProgress">
+      <div id="uploadProgressBar"><div id="uploadProgressFill"></div></div>
+      <div id="uploadProgressText">Compressing...</div>
+    </div>
     <div id="inputArea" style="display:none;">
       <div id="replyPreview"></div>
       <input id="msgInput" placeholder="Type..." />
       <div class="input-buttons">
         <div class="left-buttons">
-          <!-- Bell button will be inserted here by JavaScript for wife -->
           <button id="vidBtn">🎥</button>
           <button id="imgBtn">📷</button>
+          <button id="audioBtn">🎤</button>
         </div>
         <button id="sendBtn">Send</button>
       </div>
     </div>
   </div>
 
-  <!-- Password Protection -->
   <script>
     const password = "FAMEE";
     let userPass = "";
     while (userPass !== password) {
       userPass = prompt("Enter password:");
       if (userPass === null) {
-        document.body.innerHTML = "<h2 style='text-align:center;color:red;'>Access Denied ❌</h2>";
-        throw new Error("Closed");
+        userPass = "";
+      } else if (userPass !== password) {
+        alert("❌ Wrong password. Try again.");
       }
     }
+    // Auto-show chat card after correct password
+    const card = document.getElementById("chatCard");
+    card.style.visibility = "visible";
+    card.style.opacity = "1";
+    card.style.pointerEvents = "auto";
   </script>
 
-  <!-- Firebase + Chat + Pushover -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
-    import { getDatabase, ref, push, onChildAdded, onChildRemoved, onValue, update, remove, get, set, serverTimestamp, onDisconnect } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
+    import { getDatabase, ref, push, onChildAdded, onChildRemoved, onValue, update, remove, get, set, onDisconnect } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
 
-    // ===== FIREBASE CONFIG =====
     const firebaseConfig = {
       apiKey: "AIzaSyDiovfWJSG8yrtz5rA-3ZvjYwmhsWj2g1A",
       authDomain: "you-and-i-aa5ac.firebaseapp.com",
@@ -293,13 +323,15 @@
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
     const chatRef = ref(db, "chat");
-    const presenceRef = ref(db, "presence");
 
     let role = "";
     let replyTo = null;
     let typingTimer = null;
+    let messagesLoaded = false;
+    let childAddedRegistered = false;
+    let presenceRegistered = false;   // Fix Issue 2: guard for .info/connected
+    let listenersRegistered = false;  // Fix Issue 3: guard for presence/typing listeners
 
-    // ===== ROLE SELECTION =====
     window.selectRole = function(r) {
       role = r;
       messagesLoaded = false;
@@ -308,113 +340,111 @@
       document.getElementById("inputArea").style.display = "flex";
       document.getElementById("messages").innerHTML = "";
 
-      // ===== PRESENCE: Set online & handle disconnect =====
-      const myPresenceRef = ref(db, "presence/" + role);
-      // Use a special Firebase trick: write offline state with server timestamp on disconnect FIRST
-      onDisconnect(myPresenceRef).update({ online: false, lastSeen: Date.now() });
-      // Then set online
-      set(myPresenceRef, { online: true, lastSeen: Date.now() });
+      // Fix Issue 2: only register .info/connected once ever
+      if (!presenceRegistered) {
+        presenceRegistered = true;
+        const myPresenceRef = ref(db, "presence/" + role);
+        const connectedRef = ref(db, ".info/connected");
 
-      // Update lastSeen every 30s while online (so disconnect timestamp is fresh)
-      setInterval(() => {
-        onDisconnect(myPresenceRef).update({ online: false, lastSeen: Date.now() });
-      }, 30000);
+        onValue(connectedRef, (snap) => {
+          if (snap.val() === true) {
+            const myRef = ref(db, "presence/" + role);
+            onDisconnect(myRef).set({ online: false, lastSeen: Date.now() });
+            set(myRef, { online: true, lastSeen: Date.now() });
 
-      // ===== LISTEN TO OTHER PERSON'S PRESENCE =====
+            if (window._presenceInterval) clearInterval(window._presenceInterval);
+            window._presenceInterval = setInterval(() => {
+              onDisconnect(myRef).set({ online: false, lastSeen: Date.now() });
+              update(myRef, { lastSeen: Date.now() });
+            }, 25000);
+          }
+        });
+      } else {
+        // Already registered — just update online status for new role
+        const myRef = ref(db, "presence/" + role);
+        onDisconnect(myRef).set({ online: false, lastSeen: Date.now() });
+        set(myRef, { online: true, lastSeen: Date.now() });
+      }
+
       const other = role === 'husband' ? 'wife' : 'husband';
       const otherName = role === 'husband' ? 'Wifey' : 'Hubby';
-      const otherPresenceRef = ref(db, "presence/" + other);
-      let lastSeenInterval = null;
 
-      onValue(otherPresenceRef, (snap) => {
-        const data = snap.val();
-        const statusEl = document.getElementById("onlineStatus");
-        if (lastSeenInterval) { clearInterval(lastSeenInterval); lastSeenInterval = null; }
-
-        if (!data) { statusEl.textContent = ""; statusEl.className = ""; return; }
-
-        if (data.online) {
-          statusEl.textContent = otherName + " is online";
-          statusEl.className = "online";
-        } else if (data.lastSeen) {
-          function formatLastSeen(ts) {
-            const now = Date.now();
-            const mins = Math.floor((now - ts) / 60000);
-            if (mins < 1) return otherName + " last seen just now";
-            if (mins < 60) return otherName + " last seen " + mins + " min ago";
-            // Show actual time for today
-            const d = new Date(ts);
-            const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-            const today = new Date();
-            if (d.toDateString() === today.toDateString()) {
-              return otherName + " last seen today at " + timeStr;
-            }
-            return otherName + " last seen " + d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + " at " + timeStr;
-          }
-          statusEl.textContent = formatLastSeen(data.lastSeen);
-          statusEl.className = "";
-          lastSeenInterval = setInterval(() => {
-            statusEl.textContent = formatLastSeen(data.lastSeen);
-          }, 30000);
+      function formatLastSeen(ts) {
+        const now = Date.now();
+        const mins = Math.floor((now - ts) / 60000);
+        if (mins < 1) return otherName + " last seen just now";
+        if (mins < 60) return otherName + " last seen " + mins + " min ago";
+        const d = new Date(ts);
+        const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+        const today = new Date();
+        if (d.toDateString() === today.toDateString()) {
+          return otherName + " last seen today at " + timeStr;
         }
-      });
+        return otherName + " last seen " + d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + " at " + timeStr;
+      }
 
-      // ===== LISTEN TO OTHER PERSON'S TYPING =====
-      const otherTypingRef = ref(db, "presence/" + other + "/typing");
-      onValue(otherTypingRef, (snap) => {
-        const typingEl = document.getElementById("typingIndicator");
-        typingEl.textContent = snap.val() ? otherName + " is typing..." : "";
-      });
+      // Fix Issue 3: only register presence/typing listeners once
+      if (!listenersRegistered) {
+        listenersRegistered = true;
+        let lastSeenInterval = null;
 
+        const otherPresenceRef = ref(db, "presence/" + other);
+        onValue(otherPresenceRef, (snap) => {
+          const data = snap.val();
+          const statusEl = document.getElementById("onlineStatus");
+          if (lastSeenInterval) { clearInterval(lastSeenInterval); lastSeenInterval = null; }
+          if (!data) { statusEl.textContent = ""; statusEl.className = ""; return; }
+          if (data.online) {
+            statusEl.textContent = otherName + " is online";
+            statusEl.className = "online";
+          } else if (data.lastSeen) {
+            statusEl.textContent = formatLastSeen(data.lastSeen);
+            statusEl.className = "";
+            lastSeenInterval = setInterval(() => {
+              statusEl.textContent = formatLastSeen(data.lastSeen);
+            }, 30000);
+          }
+        });
 
-      // Create bell button for wife
+        const otherTypingRef = ref(db, "presence/" + other + "/typing");
+        onValue(otherTypingRef, (snap) => {
+          const typingEl = document.getElementById("typingIndicator");
+          typingEl.textContent = snap.val() ? otherName + " is typing..." : "";
+        });
+      }
+
       const leftButtons = document.querySelector('.left-buttons');
-      
-      // Remove any existing notify button
       const existingNotifyBtn = document.getElementById('notifyButton');
       if (existingNotifyBtn && existingNotifyBtn.parentNode) {
         existingNotifyBtn.parentNode.removeChild(existingNotifyBtn);
       }
 
       if (role === 'wife') {
-        // Create and insert bell button
         const notifyBtn = document.createElement('button');
         notifyBtn.id = 'notifyButton';
         notifyBtn.innerHTML = '🔔';
         notifyBtn.title = 'Notify Hubby';
         notifyBtn.onclick = sendNotification;
-        
-        // Insert bell button at the beginning of left buttons
         leftButtons.insertBefore(notifyBtn, leftButtons.firstChild);
       }
-      
-      // Mark all existing messages as seen
-      markExistingMessagesAsSeen();
 
-      // Load messages
+      markExistingMessagesAsSeen();
       loadMessages();
     };
 
-    // ===== MARK EXISTING MESSAGES AS SEEN =====
     async function markExistingMessagesAsSeen() {
       if (!role) return;
-      
       try {
         const snapshot = await get(chatRef);
         if (snapshot.exists()) {
           const updates = {};
-          
           snapshot.forEach((childSnapshot) => {
             const msg = childSnapshot.val();
             const key = childSnapshot.key;
-            
-            // If message is from the OTHER person and not seen by current user
             if (msg.sender !== role && (!msg.seenBy || !msg.seenBy[role])) {
               updates[`chat/${key}/seenBy/${role}`] = true;
             }
           });
-          
-          // Update all at once if there are changes
           if (Object.keys(updates).length > 0) {
             await update(ref(db), updates);
           }
@@ -424,29 +454,15 @@
       }
     }
 
-    // ===== NOTIFICATION SYSTEM =====
     function sendNotification() {
-      // Only wife can send notifications
-      if (role !== 'wife') {
-        return;
-      }
-
-      // Show sending state
+      if (role !== 'wife') return;
       const notifyBtn = document.getElementById('notifyButton');
       const originalHtml = notifyBtn.innerHTML;
       notifyBtn.innerHTML = '⏳';
       notifyBtn.disabled = true;
-
-      // ===== PUSHOVER CREDENTIALS =====
-      const PUSHOVER_USER_KEY = "uwe39vejxsq3moswbviuamrybk8fan";
-      const PUSHOVER_API_TOKEN = "azq7xhc9jiz95rifgopwxhtdc72avc";
-
-      // Send to Pushover API
       fetch('https://api.pushover.net/1/messages.json', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           token: "azq7xhc9jiz95rifgopwxhtdc72avc",
           user: "uwe39vejxsq3moswbviuamrybk8fan",
@@ -460,41 +476,26 @@
       })
       .then(response => response.json())
       .then(data => {
-        // Reset button after 2 seconds
-        setTimeout(() => {
-          notifyBtn.innerHTML = originalHtml;
-          notifyBtn.disabled = false;
-        }, 2000);
-
+        setTimeout(() => { notifyBtn.innerHTML = originalHtml; notifyBtn.disabled = false; }, 2000);
         if (data.status === 1) {
-          // Success - show checkmark briefly
           notifyBtn.innerHTML = '✅';
-          
-          // Send auto-message in chat
           push(chatRef, {
             sender: 'wife',
             text: 'I am waiting pijj come 🥺',
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
             seenBy: {}
           });
-
         } else {
-          // Failed - show X
           notifyBtn.innerHTML = '❌';
         }
       })
       .catch(error => {
         console.error('Error:', error);
         notifyBtn.innerHTML = '⚠️';
-        setTimeout(() => {
-          notifyBtn.innerHTML = originalHtml;
-          notifyBtn.disabled = false;
-        }, 2000);
+        setTimeout(() => { notifyBtn.innerHTML = originalHtml; notifyBtn.disabled = false; }, 2000);
       });
     }
 
-    // ===== CHAT FUNCTIONS =====
-    // Send text
     document.getElementById("sendBtn").onclick = () => {
       const text = document.getElementById("msgInput").value;
       if (text.trim() !== "") {
@@ -509,13 +510,11 @@
         document.getElementById("msgInput").value = "";
         replyTo = null;
         document.getElementById("replyPreview").style.display = "none";
-        // Clear typing indicator
         if (role) set(ref(db, "presence/" + role + "/typing"), false);
         clearTimeout(typingTimer);
       }
     };
 
-    // Send on Enter key
     document.getElementById("msgInput").addEventListener("keydown", function(event) {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -523,7 +522,6 @@
       }
     });
 
-    // ===== TYPING INDICATOR BROADCAST =====
     document.getElementById("msgInput").addEventListener("input", function() {
       if (!role) return;
       const myTypingRef = ref(db, "presence/" + role + "/typing");
@@ -532,29 +530,76 @@
       typingTimer = setTimeout(() => set(myTypingRef, false), 2000);
     });
 
-    // Image send
+    function showProgress(text) {
+      document.getElementById("uploadProgress").style.display = "block";
+      document.getElementById("uploadProgressFill").style.width = "0%";
+      document.getElementById("uploadProgressText").textContent = text;
+      document.getElementById("imgBtn").disabled = true;
+      document.getElementById("vidBtn").disabled = true;
+      document.getElementById("audioBtn").disabled = true;
+      document.getElementById("sendBtn").disabled = true;
+    }
+    function setProgress(pct, text) {
+      document.getElementById("uploadProgressFill").style.width = pct + "%";
+      document.getElementById("uploadProgressText").textContent = text;
+    }
+    function hideProgress() {
+      document.getElementById("uploadProgress").style.display = "none";
+      document.getElementById("imgBtn").disabled = false;
+      document.getElementById("vidBtn").disabled = false;
+      document.getElementById("audioBtn").disabled = false;
+      document.getElementById("sendBtn").disabled = false;
+    }
+
+    function compressImage(file) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          let w = img.width, h = img.height;
+          const MAX = 800;
+          if (w > MAX || h > MAX) {
+            if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+            else { w = Math.round(w * MAX / h); h = MAX; }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", 0.7));
+        };
+        img.src = url;
+      });
+    }
+
     document.getElementById("imgBtn").onclick = () => {
       const input = document.createElement("input");
       input.type = "file";
       input.accept = "image/*";
-      input.onchange = e => {
+      input.onchange = async e => {
         const file = e.target.files[0];
         if (!file) return;
-        const reader = new FileReader();
-        reader.onload = function(ev) {
-          push(chatRef, {
+        showProgress("Compressing image...");
+        setProgress(20, "Compressing image...");
+        try {
+          const compressed = await compressImage(file);
+          setProgress(70, "Sending...");
+          await push(chatRef, {
             sender: role,
-            image: ev.target.result,
+            image: compressed,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
             seenBy: {}
           });
-        };
-        reader.readAsDataURL(file);
+          setProgress(100, "Sent ✅");
+          setTimeout(hideProgress, 800);
+        } catch(err) {
+          hideProgress();
+          alert("Failed to send image 😕");
+        }
       };
       input.click();
     };
 
-    // Video send
     document.getElementById("vidBtn").onclick = () => {
       const input = document.createElement("input");
       input.type = "file";
@@ -562,28 +607,121 @@
       input.onchange = e => {
         const file = e.target.files[0];
         if (!file) return;
-        const reader = new FileReader();
-        reader.onload = function(ev) {
-          push(chatRef, {
-            sender: role,
-            video: ev.target.result,
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
-            seenBy: {}
-          });
+        const blobUrl = URL.createObjectURL(file);
+        const tempVid = document.createElement("video");
+        tempVid.preload = "metadata";
+        tempVid.src = blobUrl;
+        tempVid.onloadedmetadata = () => {
+          URL.revokeObjectURL(blobUrl);
+          if (tempVid.duration > 30) {
+            alert("❌ Video too long! Max 30 seconds.\nYour video: " + Math.round(tempVid.duration) + " sec.");
+            return;
+          }
+          showProgress("Reading video...");
+          const reader = new FileReader();
+          reader.onprogress = (ev) => {
+            if (ev.lengthComputable) {
+              const pct = Math.round((ev.loaded / ev.total) * 60);
+              setProgress(pct, "Reading video... " + pct + "%");
+            }
+          };
+          reader.onload = async (ev) => {
+            setProgress(70, "Sending to Firebase...");
+            try {
+              const base64 = ev.target.result;
+              const sizeKB = Math.round(base64.length * 0.75 / 1024);
+              if (sizeKB > 9000) {
+                hideProgress();
+                alert("❌ Video too large (" + Math.round(sizeKB/1024) + "MB).\nPlease use a shorter or lower quality video under ~9MB.");
+                return;
+              }
+              setProgress(85, "Saving...");
+              await push(chatRef, {
+                sender: role,
+                video: base64,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
+                seenBy: {}
+              });
+              setProgress(100, "Sent ✅");
+              setTimeout(hideProgress, 800);
+            } catch(err) {
+              hideProgress();
+              alert("Failed to send video 😕 Try a shorter clip.");
+            }
+          };
+          reader.onerror = () => { hideProgress(); alert("Could not read video file."); };
+          reader.readAsDataURL(file);
         };
-        reader.readAsDataURL(file);
       };
       input.click();
     };
 
-    // Reply enable
+    // ===== AUDIO RECORD + SEND =====
+    let mediaRecorder;
+    let audioChunks = [];
+
+    document.getElementById("audioBtn").onclick = async () => {
+      const btn = document.getElementById("audioBtn");
+      if (!mediaRecorder || mediaRecorder.state === "inactive") {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream);
+          audioChunks = [];
+          mediaRecorder.ondataavailable = e => { audioChunks.push(e.data); };
+          mediaRecorder.onstop = () => {
+            stream.getTracks().forEach(t => t.stop());
+            const blob = new Blob(audioChunks, { type: "audio/webm" });
+            audioChunks = [];
+            showProgress("Sending voice...");
+            setProgress(40, "Sending voice...");
+            const reader = new FileReader();
+            reader.onload = async ev => {
+              setProgress(80, "Saving...");
+              try {
+                await push(chatRef, {
+                  sender: role,
+                  audio: ev.target.result,
+                  time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }),
+                  seenBy: {}
+                });
+                setProgress(100, "Sent ✅");
+                setTimeout(hideProgress, 800);
+              } catch(err) {
+                hideProgress();
+                alert("Failed to send voice 😕");
+              }
+            };
+            reader.readAsDataURL(blob);
+          };
+          mediaRecorder.start();
+          btn.innerText = "⏹️";
+          btn.style.color = "red";
+        } catch(err) {
+          alert("Microphone access denied 🎤");
+        }
+      } else {
+        mediaRecorder.stop();
+        btn.innerText = "🎤";
+        btn.style.color = "white";
+      }
+    };
+
     function enableReply(key, msg) {
       replyTo = { key, text: msg.text, sender: msg.sender };
       document.getElementById("replyPreview").innerText = msg.sender + ": " + msg.text;
       document.getElementById("replyPreview").style.display = "block";
     }
 
-    // Render message
+    function sanitize(str) {
+      if (!str) return "";
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
     function renderMsg(key, msg) {
       let msgDiv = document.getElementById("msg-" + key);
       if (!msgDiv) {
@@ -592,7 +730,6 @@
         msgDiv.id = "msg-" + key;
         document.getElementById("messages").appendChild(msgDiv);
 
-        // ===== LIVE SEEN STATUS UPDATE =====
         if (msg.sender === role) {
           const msgSeenRef = ref(db, "chat/" + key + "/seenBy");
           onValue(msgSeenRef, (snap) => {
@@ -611,14 +748,15 @@
 
       let content = "";
       if (msg.reply) {
-        content += `<div class="replyBox">${msg.replySender}: ${msg.reply}</div>`;
+        content += `<div class="replyBox">${sanitize(msg.replySender)}: ${sanitize(msg.reply)}</div>`;
       }
 
-      const isMedia = !!(msg.image || msg.video);
+      const isMedia = !!(msg.image || msg.video || msg.audio);
 
-      if (msg.text) content += msg.text;
+      if (msg.text) content += sanitize(msg.text);
       if (msg.image) content += `<br><img src="${msg.image}" width="100">`;
       if (msg.video) content += `<br><video src="${msg.video}" width="150" controls></video>`;
+      if (msg.audio) content += `<br><audio controls src="${msg.audio}" style="width:160px;height:40px;display:block;margin-top:2px;"></audio>`;
 
       msgDiv.innerHTML = `
         ${content}
@@ -627,9 +765,7 @@
         <span class="seenStatus" id="seen-${key}"></span>
       `;
 
-      // Only allow reply on text messages (not photos/videos)
       if (!isMedia) {
-        // Swipe reply
         msgDiv.addEventListener("touchstart", function(e) {
           this.touchStartX = e.changedTouches[0].screenX;
         });
@@ -639,25 +775,18 @@
             enableReply(key, msg);
           }
         });
-        // Double click reply
         msgDiv.ondblclick = () => enableReply(key, msg);
       }
 
-      // Auto-scroll
       const msgBox = document.getElementById("messages");
       msgBox.scrollTop = msgBox.scrollHeight;
     }
 
-    // ===== LOAD MESSAGES: Existing all at once, then new ones live =====
-    let messagesLoaded = false;
-
     async function loadMessages() {
-      // 1. Load ALL existing messages at once (instant, no trickle)
       const snapshot = await get(chatRef);
       if (snapshot.exists()) {
         snapshot.forEach((child) => {
           renderMsg(child.key, child.val());
-          // Mark as seen if from other person
           if (child.val().sender !== role) {
             update(ref(db, "chat/" + child.key), { ["seenBy/" + role]: true });
           }
@@ -665,68 +794,60 @@
       }
       messagesLoaded = true;
 
-      // 2. After loading history, listen ONLY for brand new messages
-      onChildAdded(chatRef, (snap) => {
-        if (!messagesLoaded) return; // skip — already rendered above
-        const msg = snap.val();
-        const key = snap.key;
-        if (!document.getElementById("msg-" + key)) {
-          renderMsg(key, msg);
-          if (msg.sender !== role) {
-            update(ref(db, "chat/" + key), { ["seenBy/" + role]: true });
+      if (!childAddedRegistered) {
+        childAddedRegistered = true;
+        onChildAdded(chatRef, (snap) => {
+          if (!messagesLoaded) return;
+          const msg = snap.val();
+          const key = snap.key;
+          if (!document.getElementById("msg-" + key)) {
+            renderMsg(key, msg);
+            if (msg.sender !== role) {
+              update(ref(db, "chat/" + key), { ["seenBy/" + role]: true });
+            }
           }
-        }
-      });
+        });
+      }
     }
 
-    // Delete message
     window.deleteMsg = function(key) {
       remove(ref(db, "chat/" + key));
     };
 
-    // Remove from UI
     onChildRemoved(chatRef, (snapshot) => {
       const msgDiv = document.getElementById("msg-" + snapshot.key);
       if (msgDiv) msgDiv.remove();
     });
 
-    // Toggle chat
     document.getElementById("chatButton").onclick = () => {
       const card = document.getElementById("chatCard");
-      card.style.display = card.style.display === "none" ? "flex" : "none";
+      const isHidden = card.style.visibility === "hidden" || card.style.visibility === "";
+      card.style.visibility = isHidden ? "visible" : "hidden";
+      card.style.opacity = isHidden ? "1" : "0";
+      card.style.pointerEvents = isHidden ? "auto" : "none";
     };
-// ===== MOUSE WHEEL ZOOM (No Ctrl needed) =====
-let currentZoom = 1;
-const chatCard = document.getElementById('chatCard');
-const messages = document.getElementById('messages');
 
-// Listen for mouse wheel on the chat card
-chatCard.addEventListener('wheel', function(e) {
-  // Prevent page scrolling when zooming chat
-  e.preventDefault();
-  
-  // Zoom IN when scrolling UP
-  if (e.deltaY < 0) {
-    currentZoom += 0.1;
-    if (currentZoom > 1.5) currentZoom = 1.5;
-  } 
-  // Zoom OUT when scrolling DOWN
-  else {
-    currentZoom -= 0.1;
-    if (currentZoom < 0.8) currentZoom = 0.8;
-  }
-  
-  // Apply zoom
-  chatCard.style.transform = `scale(${currentZoom})`;
-  chatCard.style.transformOrigin = 'bottom left';
-  messages.style.fontSize = (10 * currentZoom) + 'px';
-  
-  // Change chat position so it stays visible
-  const newBottom = 70 + ((320 * (currentZoom - 1)) / 2);
-  const newLeft = 15 + ((250 * (currentZoom - 1)) / 2);
-  chatCard.style.bottom = `${newBottom}px`;
-  chatCard.style.left = `${newLeft}px`;
-}, { passive: false });
+    let currentZoom = 1;
+    const chatCard = document.getElementById('chatCard');
+    const messages = document.getElementById('messages');
+
+    chatCard.addEventListener('wheel', function(e) {
+      e.preventDefault();
+      if (e.deltaY < 0) {
+        currentZoom += 0.1;
+        if (currentZoom > 1.5) currentZoom = 1.5;
+      } else {
+        currentZoom -= 0.1;
+        if (currentZoom < 0.8) currentZoom = 0.8;
+      }
+      chatCard.style.transform = `scale(${currentZoom})`;
+      chatCard.style.transformOrigin = 'bottom left';
+      messages.style.fontSize = (10 * currentZoom) + 'px';
+      const newBottom = 70 + ((320 * (currentZoom - 1)) / 2);
+      const newLeft = 15 + ((250 * (currentZoom - 1)) / 2);
+      chatCard.style.bottom = `${newBottom}px`;
+      chatCard.style.left = `${newLeft}px`;
+    }, { passive: false });
   </script>
 </body>
 </html>
