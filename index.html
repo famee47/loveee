@@ -106,7 +106,7 @@
   .husband .deleteBtn { right: 3px; }
   .wife .deleteBtn { left: 3px; }
 
-  .seenStatus { font-size: 7px; color: lightgreen; display: block; }
+  .seenStatus { font-size: 8px; color: lightgreen; display: block; font-weight: 600; }
 
   #typingIndicator {
     font-size: 9px;
@@ -891,25 +891,17 @@
         .replace(/'/g, "&#039;");
     }
 
-    function renderMsg(key, msg, pending = false) {
+    function renderMsg(key, msg) {
       let msgDiv = document.getElementById("msg-" + key);
-      if (!msgDiv) {
-        msgDiv = document.createElement("div");
-        msgDiv.className = "msg " + msg.sender;
-        msgDiv.id = "msg-" + key;
-        document.getElementById("messages").appendChild(msgDiv);
-
-        if (msg.sender === role && !seenListeners.has(key)) {
-          seenListeners.add(key);
-          const msgSeenRef = ref(db, "chat/" + key + "/seenBy");
-          onValue(msgSeenRef, (snap) => {
-            const seenBy = snap.val();
-            const opposite = role === 'husband' ? 'wife' : 'husband';
-            const seenEl = document.getElementById("seen-" + key);
-            if (seenEl) seenEl.textContent = (seenBy && seenBy[opposite]) ? "✓" : "";
-          });
-        }
+      if (msgDiv) {
+        // Already rendered - never wipe innerHTML again, seen listener is still alive
+        return;
       }
+
+      msgDiv = document.createElement("div");
+      msgDiv.className = "msg " + msg.sender;
+      msgDiv.id = "msg-" + key;
+      document.getElementById("messages").appendChild(msgDiv);
 
       let deleteBtn = "";
       if (msg.sender === role) {
@@ -923,8 +915,6 @@
         content += `<div class="replyBox" ${jumpKey} ${cursor}>${sanitize(msg.replySender)}: ${sanitize(msg.reply)}</div>`;
       }
 
-      const isMedia = !!(msg.image || msg.video || msg.audio);
-
       if (msg.text) content += sanitize(msg.text);
       if (msg.image) content += `<br><img src="${msg.image}" width="100" style="cursor:pointer;border-radius:4px;" onclick="openFullscreenImg(this.src)">`;
       if (msg.video) content += `<br><div style="position:relative;display:inline-block;"><video src="${msg.video}" width="150" controls style="display:block;border-radius:4px;"></video><button onclick="openFullscreenVid(this.previousElementSibling.src)" style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,0.6);color:white;border:none;border-radius:4px;font-size:10px;padding:2px 5px;cursor:pointer;">⛶</button></div>`;
@@ -937,38 +927,7 @@
         <span class="seenStatus" id="seen-${key}"></span>
       `;
 
-      // Allow reply on ALL message types (text, image, video, audio)
-      msgDiv.addEventListener("touchstart", function(e) {
-        this.touchStartX = e.changedTouches[0].screenX;
-      });
-      msgDiv.addEventListener("touchend", function(e) {
-        let touchEndX = e.changedTouches[0].screenX;
-        if (this.touchStartX - touchEndX > 50) {
-          enableReply(key, msg);
-        }
-      });
-      msgDiv.ondblclick = () => enableReply(key, msg);
-
-      const msgBox = document.getElementById("messages");
-      msgBox.scrollTop = msgBox.scrollHeight;
-    }
-
-    function renderMsgPrepend(key, msg) {
-      // Like renderMsg but inserts at TOP of messages div
-      let msgDiv = document.getElementById("msg-" + key);
-      if (msgDiv) return;
-      msgDiv = document.createElement("div");
-      msgDiv.className = "msg " + msg.sender;
-      msgDiv.id = "msg-" + key;
-      const messagesEl = document.getElementById("messages");
-      // Insert after the "load more" button if it exists, else at top
-      const loadMoreBtn = document.getElementById("loadMoreBtn");
-      if (loadMoreBtn) {
-        loadMoreBtn.after(msgDiv);
-      } else {
-        messagesEl.prepend(msgDiv);
-      }
-
+      // Attach seen listener — fires from Firebase cache immediately with current value
       if (msg.sender === role && !seenListeners.has(key)) {
         seenListeners.add(key);
         const msgSeenRef = ref(db, "chat/" + key + "/seenBy");
@@ -980,6 +939,33 @@
         });
       }
 
+      msgDiv.addEventListener("touchstart", function(e) {
+        this.touchStartX = e.changedTouches[0].screenX;
+      });
+      msgDiv.addEventListener("touchend", function(e) {
+        if (this.touchStartX - e.changedTouches[0].screenX > 50) enableReply(key, msg);
+      });
+      msgDiv.ondblclick = () => enableReply(key, msg);
+
+      const msgBox = document.getElementById("messages");
+      msgBox.scrollTop = msgBox.scrollHeight;
+    }
+
+    function renderMsgPrepend(key, msg) {
+      let msgDiv = document.getElementById("msg-" + key);
+      if (msgDiv) return;
+      msgDiv = document.createElement("div");
+      msgDiv.className = "msg " + msg.sender;
+      msgDiv.id = "msg-" + key;
+      const messagesEl = document.getElementById("messages");
+      const loadMoreBtn = document.getElementById("loadMoreBtn");
+      if (loadMoreBtn) {
+        loadMoreBtn.after(msgDiv);
+      } else {
+        messagesEl.prepend(msgDiv);
+      }
+
+      // Build and set innerHTML FIRST so span exists before listener fires
       let deleteBtn = msg.sender === role ? `<button class="deleteBtn" onclick="deleteMsg('${key}')">✖</button>` : "";
       let content = "";
       if (msg.reply) {
@@ -993,6 +979,18 @@
       if (msg.audio) content += `<br><audio controls src="${msg.audio}" style="width:160px;height:40px;display:block;margin-top:2px;"></audio>`;
       msgDiv.innerHTML = `${content}<span class="time">${msg.time || ""}</span>${deleteBtn}<span class="seenStatus" id="seen-${key}"></span>`;
 
+      // Attach listener AFTER innerHTML — span now exists so ✓ won't be lost
+      if (msg.sender === role && !seenListeners.has(key)) {
+        seenListeners.add(key);
+        const msgSeenRef = ref(db, "chat/" + key + "/seenBy");
+        onValue(msgSeenRef, (snap) => {
+          const seenBy = snap.val();
+          const opposite = role === 'husband' ? 'wife' : 'husband';
+          const seenEl = document.getElementById("seen-" + key);
+          if (seenEl) seenEl.textContent = (seenBy && seenBy[opposite]) ? "✓" : "";
+        });
+      }
+
       msgDiv.addEventListener("touchstart", function(e) { this.touchStartX = e.changedTouches[0].screenX; });
       msgDiv.addEventListener("touchend", function(e) {
         if (this.touchStartX - e.changedTouches[0].screenX > 50) enableReply(key, msg);
@@ -1000,26 +998,39 @@
       msgDiv.ondblclick = () => enableReply(key, msg);
     }
 
+    let loadingOlder = false;
     async function loadOlderMessages() {
-      if (allLoaded || !oldestKey) return;
+      if (allLoaded || !oldestKey || loadingOlder) return;
+      loadingOlder = true;
       const messagesEl = document.getElementById("messages");
       const prevHeight = messagesEl.scrollHeight;
 
-      const q = query(chatRef, orderByKey(), endBefore(oldestKey), limitToLast(PAGE_SIZE));
-      const snapshot = await get(q);
-      if (!snapshot.exists()) { allLoaded = true; document.getElementById("loadMoreBtn")?.remove(); return; }
+      try {
+        const q = query(chatRef, orderByKey(), endBefore(oldestKey), limitToLast(PAGE_SIZE));
+        const snapshot = await get(q);
+        if (!snapshot.exists()) {
+          allLoaded = true;
+          document.getElementById("loadMoreBtn")?.remove();
+          return;
+        }
 
-      const items = [];
-      snapshot.forEach(child => items.push({ key: child.key, val: child.val() }));
-      if (items.length < PAGE_SIZE) { allLoaded = true; document.getElementById("loadMoreBtn")?.remove(); }
+        const items = [];
+        snapshot.forEach(child => items.push({ key: child.key, val: child.val() }));
+        if (items.length < PAGE_SIZE) {
+          allLoaded = true;
+          document.getElementById("loadMoreBtn")?.remove();
+        }
 
-      oldestKey = items[0].key;
-      // Loop in reverse so oldest message ends up at the top after prepending
-      for (let i = items.length - 1; i >= 0; i--) {
-        renderMsgPrepend(items[i].key, items[i].val);
+        oldestKey = items[0].key;
+        // Loop in reverse so oldest ends at top after prepending
+        for (let i = items.length - 1; i >= 0; i--) {
+          renderMsgPrepend(items[i].key, items[i].val);
+        }
+        // Keep scroll position stable
+        messagesEl.scrollTop = messagesEl.scrollHeight - prevHeight;
+      } finally {
+        loadingOlder = false;
       }
-      // Keep scroll position stable
-      messagesEl.scrollTop = messagesEl.scrollHeight - prevHeight;
     }
 
     async function loadMessages() {
