@@ -436,16 +436,27 @@
         document.addEventListener('visibilitychange', () => {
           const myRef = ref(db, "presence/" + role);
           if (document.visibilityState === 'hidden') {
-            // Use update() NOT set() — set() cancels onDisconnect, update() does not
-            // Firebase connection stays alive when minimized → seen marking still works
-            update(myRef, { minimized: true, lastSeen: Date.now() });
-            // Re-register onDisconnect after any write (safety)
-            onDisconnect(myRef).set({ online: false, minimized: false, lastSeen: serverTimestamp() });
+            // Tab minimized/backgrounded:
+            // CANCEL onDisconnect — prevents Firebase connection timeout from
+            // wrongly flipping status to offline while tab is just minimized.
+            // Seen marking still works since Firebase connection stays alive.
+            onDisconnect(myRef).cancel();
+            update(myRef, { minimized: true, online: true, lastSeen: Date.now() });
           } else {
-            // Tab back in focus — fully active
-            update(myRef, { online: true, minimized: false, lastSeen: Date.now() });
+            // Tab back in focus — re-arm onDisconnect and go fully online
             onDisconnect(myRef).set({ online: false, minimized: false, lastSeen: serverTimestamp() });
+            update(myRef, { online: true, minimized: false, lastSeen: Date.now() });
           }
+        });
+
+        // pagehide fires when tab/browser is actually closed (even from background).
+        // Since onDisconnect is cancelled while minimized, we use pagehide as
+        // a fallback to manually write offline status on real close.
+        window.addEventListener('pagehide', () => {
+          const myRef = ref(db, "presence/" + role);
+          // Use keepalive fetch trick — navigator.sendBeacon or just attempt the write
+          // Firebase will try to flush this before the page unloads
+          set(myRef, { online: false, minimized: false, lastSeen: Date.now() });
         });
       } else {
         const myRef = ref(db, "presence/" + role);
