@@ -106,7 +106,7 @@
   .husband .deleteBtn { right: 3px; }
   .wife .deleteBtn { left: 3px; }
 
-  .seenStatus { font-size: 8px; color: lightgreen; margin-top: 1px; display: block; }
+  .seenStatus { font-size: 7px; color: lightgreen; display: block; }
 
   #typingIndicator {
     font-size: 9px;
@@ -369,7 +369,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
-    import { getDatabase, ref, push, onChildAdded, onChildRemoved, onValue, update, remove, get, set, onDisconnect } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
+    import { getDatabase, ref, push, onChildAdded, onChildRemoved, onValue, update, remove, get, set, onDisconnect, query, orderByKey, limitToLast, endBefore, startAfter } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyDiovfWJSG8yrtz5rA-3ZvjYwmhsWj2g1A",
@@ -393,6 +393,10 @@
     let presenceRegistered = false;
     let listenersRegistered = false;
     let isOnline = true;
+    let oldestKey = null;
+    let allLoaded = false;
+    const seenListeners = new Set();
+    const PAGE_SIZE = 20;
 
     window.selectRole = function(r) {
       role = r;
@@ -405,41 +409,46 @@
       // Fix Issue 2: only register .info/connected once ever
       if (!presenceRegistered) {
         presenceRegistered = true;
-        const myPresenceRef = ref(db, "presence/" + role);
         const connectedRef = ref(db, ".info/connected");
 
         onValue(connectedRef, (snap) => {
-          // Show/hide offline banner based on Firebase connection
           const banner = document.getElementById('offlineBanner');
           if (snap.val() === true) {
             banner.style.display = 'none';
             isOnline = true;
-          } else {
-            banner.style.display = 'block';
-            isOnline = false;
-          }
-
-          if (snap.val() === true) {
-            // Remove pending dots from any messages sent while offline
             pendingKeys.forEach(key => {
               const dot = document.getElementById("dot-" + key);
               if (dot) dot.remove();
               pendingKeys.delete(key);
             });
-
             const myRef = ref(db, "presence/" + role);
             onDisconnect(myRef).set({ online: false, lastSeen: Date.now() });
             set(myRef, { online: true, lastSeen: Date.now() });
-
             if (window._presenceInterval) clearInterval(window._presenceInterval);
             window._presenceInterval = setInterval(() => {
               onDisconnect(myRef).set({ online: false, lastSeen: Date.now() });
               update(myRef, { lastSeen: Date.now() });
             }, 25000);
+          } else {
+            banner.style.display = 'block';
+            isOnline = false;
+          }
+        });
+
+        // Only mark offline when tab is closed/hidden — NOT on minimize
+        document.addEventListener('visibilitychange', () => {
+          const myRef = ref(db, "presence/" + role);
+          if (document.visibilityState === 'hidden') {
+            // Minimized or switching apps — set offline immediately (status only)
+            // Seen marking still works because the page is still running
+            set(myRef, { online: false, lastSeen: Date.now() });
+          } else {
+            // Tab visible again — mark online
+            clearTimeout(window._hiddenTimer);
+            set(myRef, { online: true, lastSeen: Date.now() });
           }
         });
       } else {
-        // Already registered — just update online status for new role
         const myRef = ref(db, "presence/" + role);
         onDisconnect(myRef).set({ online: false, lastSeen: Date.now() });
         set(myRef, { online: true, lastSeen: Date.now() });
@@ -521,7 +530,9 @@
     async function markExistingMessagesAsSeen() {
       if (!role) return;
       try {
-        const snapshot = await get(chatRef);
+        // Only fetch last 20 — no need to load entire history just to mark seen
+        const q = query(chatRef, orderByKey(), limitToLast(PAGE_SIZE));
+        const snapshot = await get(q);
         if (snapshot.exists()) {
           const updates = {};
           snapshot.forEach((childSnapshot) => {
@@ -582,7 +593,7 @@
       });
     }
 
-    function openFullscreenImg(src) {
+    window.openFullscreenImg = function(src) {
       const overlay = document.getElementById('fullscreenOverlay');
       const img = document.getElementById('fullscreenImg');
       const vid = document.getElementById('fullscreenVid');
@@ -592,7 +603,7 @@
       overlay.classList.add('active');
     }
 
-    function openFullscreenVid(src) {
+    window.openFullscreenVid = function(src) {
       const overlay = document.getElementById('fullscreenOverlay');
       const img = document.getElementById('fullscreenImg');
       const vid = document.getElementById('fullscreenVid');
@@ -870,18 +881,6 @@
       }, 800);
     }
 
-    function jumpToMessage(key) {
-      const target = document.getElementById("msg-" + key);
-      if (!target) return;
-      target.scrollIntoView({ behavior: "smooth", block: "center" });
-      target.style.transition = "background 0.3s ease";
-      target.style.background = "#2a2a2a";
-      setTimeout(() => {
-        target.style.transition = "background 0.8s ease";
-        target.style.background = "#000";
-      }, 800);
-    }
-
     function sanitize(str) {
       if (!str) return "";
       return str
@@ -900,13 +899,14 @@
         msgDiv.id = "msg-" + key;
         document.getElementById("messages").appendChild(msgDiv);
 
-        if (msg.sender === role) {
+        if (msg.sender === role && !seenListeners.has(key)) {
+          seenListeners.add(key);
           const msgSeenRef = ref(db, "chat/" + key + "/seenBy");
           onValue(msgSeenRef, (snap) => {
             const seenBy = snap.val();
             const opposite = role === 'husband' ? 'wife' : 'husband';
             const seenEl = document.getElementById("seen-" + key);
-            if (seenEl) seenEl.textContent = (seenBy && seenBy[opposite]) ? "Seen ✅" : "";
+            if (seenEl) seenEl.textContent = (seenBy && seenBy[opposite]) ? "✓" : "";
           });
         }
       }
@@ -953,21 +953,125 @@
       msgBox.scrollTop = msgBox.scrollHeight;
     }
 
+    function renderMsgPrepend(key, msg) {
+      // Like renderMsg but inserts at TOP of messages div
+      let msgDiv = document.getElementById("msg-" + key);
+      if (msgDiv) return;
+      msgDiv = document.createElement("div");
+      msgDiv.className = "msg " + msg.sender;
+      msgDiv.id = "msg-" + key;
+      const messagesEl = document.getElementById("messages");
+      // Insert after the "load more" button if it exists, else at top
+      const loadMoreBtn = document.getElementById("loadMoreBtn");
+      if (loadMoreBtn) {
+        loadMoreBtn.after(msgDiv);
+      } else {
+        messagesEl.prepend(msgDiv);
+      }
+
+      if (msg.sender === role && !seenListeners.has(key)) {
+        seenListeners.add(key);
+        const msgSeenRef = ref(db, "chat/" + key + "/seenBy");
+        onValue(msgSeenRef, (snap) => {
+          const seenBy = snap.val();
+          const opposite = role === 'husband' ? 'wife' : 'husband';
+          const seenEl = document.getElementById("seen-" + key);
+          if (seenEl) seenEl.textContent = (seenBy && seenBy[opposite]) ? "✓" : "";
+        });
+      }
+
+      let deleteBtn = msg.sender === role ? `<button class="deleteBtn" onclick="deleteMsg('${key}')">✖</button>` : "";
+      let content = "";
+      if (msg.reply) {
+        const jumpKey = msg.replyKey ? `onclick="jumpToMessage('${msg.replyKey}')"` : "";
+        const cursor = msg.replyKey ? `style="cursor:pointer;"` : "";
+        content += `<div class="replyBox" ${jumpKey} ${cursor}>${sanitize(msg.replySender)}: ${sanitize(msg.reply)}</div>`;
+      }
+      if (msg.text) content += sanitize(msg.text);
+      if (msg.image) content += `<br><img src="${msg.image}" width="100" style="cursor:pointer;border-radius:4px;" onclick="openFullscreenImg(this.src)">`;
+      if (msg.video) content += `<br><div style="position:relative;display:inline-block;"><video src="${msg.video}" width="150" controls style="display:block;border-radius:4px;"></video><button onclick="openFullscreenVid(this.previousElementSibling.src)" style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,0.6);color:white;border:none;border-radius:4px;font-size:10px;padding:2px 5px;cursor:pointer;">⛶</button></div>`;
+      if (msg.audio) content += `<br><audio controls src="${msg.audio}" style="width:160px;height:40px;display:block;margin-top:2px;"></audio>`;
+      msgDiv.innerHTML = `${content}<span class="time">${msg.time || ""}</span>${deleteBtn}<span class="seenStatus" id="seen-${key}"></span>`;
+
+      msgDiv.addEventListener("touchstart", function(e) { this.touchStartX = e.changedTouches[0].screenX; });
+      msgDiv.addEventListener("touchend", function(e) {
+        if (this.touchStartX - e.changedTouches[0].screenX > 50) enableReply(key, msg);
+      });
+      msgDiv.ondblclick = () => enableReply(key, msg);
+    }
+
+    async function loadOlderMessages() {
+      if (allLoaded || !oldestKey) return;
+      const messagesEl = document.getElementById("messages");
+      const prevHeight = messagesEl.scrollHeight;
+
+      const q = query(chatRef, orderByKey(), endBefore(oldestKey), limitToLast(PAGE_SIZE));
+      const snapshot = await get(q);
+      if (!snapshot.exists()) { allLoaded = true; document.getElementById("loadMoreBtn")?.remove(); return; }
+
+      const items = [];
+      snapshot.forEach(child => items.push({ key: child.key, val: child.val() }));
+      if (items.length < PAGE_SIZE) { allLoaded = true; document.getElementById("loadMoreBtn")?.remove(); }
+
+      oldestKey = items[0].key;
+      // Loop in reverse so oldest message ends up at the top after prepending
+      for (let i = items.length - 1; i >= 0; i--) {
+        renderMsgPrepend(items[i].key, items[i].val);
+      }
+      // Keep scroll position stable
+      messagesEl.scrollTop = messagesEl.scrollHeight - prevHeight;
+    }
+
     async function loadMessages() {
       if (!childAddedRegistered) {
         childAddedRegistered = true;
 
-        // onChildAdded fires for ALL existing messages first, then new ones
-        // No need for get() — this avoids the double-render race condition
-        onChildAdded(chatRef, (snap) => {
-          const msg = snap.val();
+        // Load last PAGE_SIZE messages first
+        const initQuery = query(chatRef, orderByKey(), limitToLast(PAGE_SIZE));
+        const snapshot = await get(initQuery);
+        const initialKeys = new Set();
+        let lastKey = null;
+
+        if (snapshot.exists()) {
+          const items = [];
+          snapshot.forEach(child => items.push({ key: child.key, val: child.val() }));
+          oldestKey = items[0].key;
+          lastKey = items[items.length - 1].key;
+          if (items.length < PAGE_SIZE) allLoaded = true;
+
+          items.forEach(({ key, val }) => {
+            initialKeys.add(key);
+            renderMsg(key, val);
+            if (val.sender !== role) update(ref(db, "chat/" + key), { ["seenBy/" + role]: true });
+          });
+
+          // Show "load more" button at top if there are older messages
+          if (!allLoaded) {
+            const btn = document.createElement("div");
+            btn.id = "loadMoreBtn";
+            btn.textContent = "↑ Load older messages";
+            btn.style.cssText = "text-align:center;font-size:8px;color:#888;padding:4px;cursor:pointer;border-bottom:1px solid #222;";
+            btn.onclick = loadOlderMessages;
+            document.getElementById("messages").prepend(btn);
+          }
+        }
+
+        messagesLoaded = true;
+
+        // Listen ONLY for messages after the last loaded key — no replay of history
+        const listenQuery = lastKey ? query(chatRef, orderByKey(), startAfter(lastKey)) : chatRef;
+        onChildAdded(listenQuery, (snap) => {
           const key = snap.key;
+          const msg = snap.val();
           if (!document.getElementById("msg-" + key)) {
             renderMsg(key, msg);
-            if (msg.sender !== role) {
-              update(ref(db, "chat/" + key), { ["seenBy/" + role]: true });
-            }
+            if (msg.sender !== role) update(ref(db, "chat/" + key), { ["seenBy/" + role]: true });
           }
+        });
+
+        // Load more when scrolled to top
+        document.getElementById("messages").addEventListener("scroll", function() {
+          if (this.scrollTop < 30 && !allLoaded) loadOlderMessages();
         });
       }
       messagesLoaded = true;
