@@ -896,7 +896,7 @@
           const seenBy = snap.val();
           const opposite = role === 'husband' ? 'wife' : 'husband';
           const seenEl = document.getElementById("seen-" + key);
-          if (seenEl) seenEl.textContent = (seenBy && seenBy[opposite]) ? "✓" : "";
+          if (seenEl) seenEl.textContent = (seenBy && seenBy[opposite]) ? "Seen ✅" : "";
         });
       }
 
