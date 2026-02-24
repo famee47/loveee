@@ -149,7 +149,6 @@
     display: block;
   }
   #onlineStatus.online { color: lightgreen; }
-  #onlineStatus.minimized { color: #f0a500; }
 
   .replyBox {
   font-size: 9px;
@@ -361,7 +360,6 @@
         alert("❌ Wrong password. Try again.");
       }
     }
-    // Auto-show chat card after correct password
     const card = document.getElementById("chatCard");
     card.style.visibility = "visible";
     card.style.opacity = "1";
@@ -370,7 +368,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
-    import { getDatabase, ref, push, onChildAdded, onChildRemoved, onValue, update, remove, get, set, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
+    import { getDatabase, ref, push, onChildAdded, onChildRemoved, onValue, update, remove, get, set, onDisconnect } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyDiovfWJSG8yrtz5rA-3ZvjYwmhsWj2g1A",
@@ -419,12 +417,12 @@
               pendingKeys.delete(key);
             });
             const myRef = ref(db, "presence/" + role);
-            // onDisconnect uses serverTimestamp so lastSeen is always exact when tab closes
-            onDisconnect(myRef).set({ online: false, minimized: false, lastSeen: serverTimestamp() });
-            set(myRef, { online: true, minimized: false, lastSeen: Date.now() });
+            // onDisconnect: server sets offline when connection truly drops (tab close, crash, network loss)
+            onDisconnect(myRef).set({ online: false, lastSeen: Date.now() });
+            set(myRef, { online: true, lastSeen: Date.now() });
             if (window._presenceInterval) clearInterval(window._presenceInterval);
             window._presenceInterval = setInterval(() => {
-              onDisconnect(myRef).set({ online: false, minimized: false, lastSeen: serverTimestamp() });
+              onDisconnect(myRef).set({ online: false, lastSeen: Date.now() });
               update(myRef, { lastSeen: Date.now() });
             }, 25000);
           } else {
@@ -433,35 +431,27 @@
           }
         });
 
+        // visibilitychange: when minimized, show offline status to other person
+        // Firebase WebSocket stays alive → seen marking still works in background
+        // When tab fully closes, onDisconnect fires server-side (reliable)
         document.addEventListener('visibilitychange', () => {
+          if (!role) return;
           const myRef = ref(db, "presence/" + role);
           if (document.visibilityState === 'hidden') {
-            // Tab minimized/backgrounded:
-            // CANCEL onDisconnect — prevents Firebase connection timeout from
-            // wrongly flipping status to offline while tab is just minimized.
-            // Seen marking still works since Firebase connection stays alive.
-            onDisconnect(myRef).cancel();
-            update(myRef, { minimized: true, online: true, lastSeen: Date.now() });
+            // Minimized — set offline in status display only
+            // Do NOT cancel onDisconnect — keep it armed for when tab actually closes
+            set(myRef, { online: false, lastSeen: Date.now() });
           } else {
-            // Tab back in focus — re-arm onDisconnect and go fully online
-            onDisconnect(myRef).set({ online: false, minimized: false, lastSeen: serverTimestamp() });
-            update(myRef, { online: true, minimized: false, lastSeen: Date.now() });
+            // Back in focus — re-arm onDisconnect and mark online
+            onDisconnect(myRef).set({ online: false, lastSeen: Date.now() });
+            set(myRef, { online: true, lastSeen: Date.now() });
           }
         });
 
-        // pagehide fires when tab/browser is actually closed (even from background).
-        // Since onDisconnect is cancelled while minimized, we use pagehide as
-        // a fallback to manually write offline status on real close.
-        window.addEventListener('pagehide', () => {
-          const myRef = ref(db, "presence/" + role);
-          // Use keepalive fetch trick — navigator.sendBeacon or just attempt the write
-          // Firebase will try to flush this before the page unloads
-          set(myRef, { online: false, minimized: false, lastSeen: Date.now() });
-        });
       } else {
         const myRef = ref(db, "presence/" + role);
-        onDisconnect(myRef).set({ online: false, minimized: false, lastSeen: serverTimestamp() });
-        set(myRef, { online: true, minimized: false, lastSeen: Date.now() });
+        onDisconnect(myRef).set({ online: false, lastSeen: Date.now() });
+        set(myRef, { online: true, lastSeen: Date.now() });
       }
 
       const other = role === 'husband' ? 'wife' : 'husband';
@@ -474,11 +464,9 @@
         const ampm = h >= 12 ? 'PM' : 'AM';
         const h12 = h % 12 === 0 ? 12 : h % 12;
         const timeStr = h12 + ':' + m + ' ' + ampm;
-
         const today = new Date();
         const yesterday = new Date(today);
         yesterday.setDate(today.getDate() - 1);
-
         if (d.toDateString() === today.toDateString()) {
           return otherName + " last seen " + timeStr;
         } else if (d.toDateString() === yesterday.toDateString()) {
@@ -497,22 +485,14 @@
           const data = snap.val();
           const statusEl = document.getElementById("onlineStatus");
           if (!data) { statusEl.textContent = ""; statusEl.className = ""; return; }
-
-          if (data.online && !data.minimized) {
-            // Fully active in the tab
+          if (data.online) {
             statusEl.textContent = otherName + " is online";
             statusEl.className = "online";
-          } else if (data.online && data.minimized) {
-            // Tab is open but minimized/backgrounded — Firebase still alive → seen works
-            statusEl.textContent = otherName + " minimized 📴";
-            statusEl.className = "minimized";
+          } else if (data.lastSeen) {
+            statusEl.textContent = formatLastSeen(data.lastSeen);
+            statusEl.className = "";
           } else {
-            // Fully closed / disconnected
-            if (data.lastSeen) {
-              statusEl.textContent = formatLastSeen(data.lastSeen);
-            } else {
-              statusEl.textContent = otherName + " is offline";
-            }
+            statusEl.textContent = otherName + " is offline";
             statusEl.className = "";
           }
         });
@@ -644,7 +624,8 @@
 
       document.getElementById("msgInput").value = "";
       replyTo = null;
-      document.getElementById("replyPreview").style.display = "none"; document.getElementById("replyPreviewText").innerText = "";
+      document.getElementById("replyPreview").style.display = "none";
+      document.getElementById("replyPreviewText").innerText = "";
       if (role) set(ref(db, "presence/" + role + "/typing"), false);
       clearTimeout(typingTimer);
 
@@ -908,6 +889,7 @@
         ${msg.sender === role ? `<span class="seenStatus" id="seen-${key}"></span>` : ''}
       `;
 
+      // Per-message seen listener — only tiny seenBy node, not whole chat
       if (msg.sender === role && !seenListeners.has(key)) {
         seenListeners.add(key);
         onValue(ref(db, "chat/" + key + "/seenBy"), (snap) => {
@@ -933,6 +915,7 @@
       if (childAddedRegistered) return;
       childAddedRegistered = true;
 
+      // Step 1: bulk fetch all existing messages at once — fast single request
       const snapshot = await get(chatRef);
       if (snapshot.exists()) {
         snapshot.forEach((child) => {
@@ -944,6 +927,7 @@
       }
       messagesLoaded = true;
 
+      // Step 2: only new messages from here on
       onChildAdded(chatRef, (snap) => {
         if (!messagesLoaded) return;
         const key = snap.key;
