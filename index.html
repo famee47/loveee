@@ -432,16 +432,16 @@
           }
         });
 
-        // Only mark offline when tab is closed/hidden — NOT on minimize
+        // onDisconnect fires server-side when tab is fully closed — sets offline in Firebase
+        // visibilitychange only updates the STATUS DISPLAY for the other person
+        // The Firebase connection stays alive when minimized — so seen marking still works
         document.addEventListener('visibilitychange', () => {
           const myRef = ref(db, "presence/" + role);
           if (document.visibilityState === 'hidden') {
-            // Minimized or switching apps — set offline immediately (status only)
-            // Seen marking still works because the page is still running
+            // Show as offline to other person, but Firebase stays connected → seen still works
             set(myRef, { online: false, lastSeen: Date.now() });
           } else {
-            // Tab visible again — mark online
-            clearTimeout(window._hiddenTimer);
+            // Back in tab — show online again
             set(myRef, { online: true, lastSeen: Date.now() });
           }
         });
@@ -520,31 +520,8 @@
         leftButtons.insertBefore(notifyBtn, leftButtons.firstChild);
       }
 
-      markExistingMessagesAsSeen();
       loadMessages();
     };
-
-    async function markExistingMessagesAsSeen() {
-      if (!role) return;
-      try {
-        const snapshot = await get(chatRef);
-        if (snapshot.exists()) {
-          const updates = {};
-          snapshot.forEach((childSnapshot) => {
-            const msg = childSnapshot.val();
-            const key = childSnapshot.key;
-            if (msg.sender !== role && (!msg.seenBy || !msg.seenBy[role])) {
-              updates[`chat/${key}/seenBy/${role}`] = true;
-            }
-          });
-          if (Object.keys(updates).length > 0) {
-            await update(ref(db), updates);
-          }
-        }
-      } catch (error) {
-        console.error("Error marking messages as seen:", error);
-      }
-    }
 
     function sendNotification() {
       if (role !== 'wife') return;
@@ -887,13 +864,9 @@
     }
 
     function renderMsg(key, msg) {
-      let msgDiv = document.getElementById("msg-" + key);
-      if (msgDiv) {
-        // Already rendered - never wipe innerHTML again, seen listener is still alive
-        return;
-      }
+      if (document.getElementById("msg-" + key)) return;
 
-      msgDiv = document.createElement("div");
+      const msgDiv = document.createElement("div");
       msgDiv.className = "msg " + msg.sender;
       msgDiv.id = "msg-" + key;
       document.getElementById("messages").appendChild(msgDiv);
@@ -909,7 +882,6 @@
         const cursor = msg.replyKey ? `style="cursor:pointer;"` : "";
         content += `<div class="replyBox" ${jumpKey} ${cursor}>${sanitize(msg.replySender)}: ${sanitize(msg.reply)}</div>`;
       }
-
       if (msg.text) content += sanitize(msg.text);
       if (msg.image) content += `<br><img src="${msg.image}" width="100" style="cursor:pointer;border-radius:4px;" onclick="openFullscreenImg(this.src)">`;
       if (msg.video) content += `<br><div style="position:relative;display:inline-block;"><video src="${msg.video}" width="150" controls style="display:block;border-radius:4px;"></video><button onclick="openFullscreenVid(this.previousElementSibling.src)" style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,0.6);color:white;border:none;border-radius:4px;font-size:10px;padding:2px 5px;cursor:pointer;">⛶</button></div>`;
@@ -917,16 +889,16 @@
 
       msgDiv.innerHTML = `
         ${content}
-        <span class="time">${msg.time || ""}${pendingKeys.has(key) ? ' <span id="dot-${key}" style="color:#f90;font-size:8px;">•</span>' : ''}</span>
+        <span class="time">${msg.time || ""}${pendingKeys.has(key) ? ` <span id="dot-${key}" style="color:#f90;font-size:8px;">•</span>` : ''}</span>
         ${deleteBtn}
-        <span class="seenStatus" id="seen-${key}"></span>
+        ${msg.sender === role ? `<span class="seenStatus" id="seen-${key}"></span>` : ''}
       `;
 
-      // Attach seen listener — fires from Firebase cache immediately with current value
+      // Per-message seen listener — only listens to tiny seenBy node, not full chat
+      // seenListeners Set ensures we only attach once per message key
       if (msg.sender === role && !seenListeners.has(key)) {
         seenListeners.add(key);
-        const msgSeenRef = ref(db, "chat/" + key + "/seenBy");
-        onValue(msgSeenRef, (snap) => {
+        onValue(ref(db, "chat/" + key + "/seenBy"), (snap) => {
           const seenBy = snap.val();
           const opposite = role === 'husband' ? 'wife' : 'husband';
           const seenEl = document.getElementById("seen-" + key);
@@ -942,16 +914,28 @@
       });
       msgDiv.ondblclick = () => enableReply(key, msg);
 
-      const msgBox = document.getElementById("messages");
-      msgBox.scrollTop = msgBox.scrollHeight;
+      document.getElementById("messages").scrollTop = document.getElementById("messages").scrollHeight;
     }
 
     async function loadMessages() {
       if (childAddedRegistered) return;
       childAddedRegistered = true;
 
-      // Load all messages at once via onChildAdded — Firebase streams them fast
+      // Step 1: Fetch ALL existing messages at once (fast single request)
+      const snapshot = await get(chatRef);
+      if (snapshot.exists()) {
+        snapshot.forEach((child) => {
+          renderMsg(child.key, child.val());
+          if (child.val().sender !== role) {
+            update(ref(db, "chat/" + child.key), { ["seenBy/" + role]: true });
+          }
+        });
+      }
+      messagesLoaded = true;
+
+      // Step 2: Listen ONLY for new messages added after initial load
       onChildAdded(chatRef, (snap) => {
+        if (!messagesLoaded) return;
         const key = snap.key;
         const msg = snap.val();
         if (!document.getElementById("msg-" + key)) {
@@ -961,8 +945,6 @@
           }
         }
       });
-
-      messagesLoaded = true;
     }
 
     window.deleteMsg = function(key) {
