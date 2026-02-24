@@ -1,0 +1,968 @@
+<!DOCTYPE html><html>
+<head>
+  <title>You and I</title>
+  <!-- Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-F8ET9YT40D"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-F8ET9YT40D');
+  </script>
+  <style>
+  body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background: black;
+    color: white;
+  }
+
+  #chatButton {
+    position: fixed;
+    bottom: 15px;
+    left: 15px;
+    background: #000;
+    color: white;
+    border: 1px solid #333;
+    border-radius: 50%;
+    width: 45px;
+    height: 45px;
+    cursor: pointer;
+    font-size: 20px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+  }
+
+  #chatCard {
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  bottom: 70px;
+  left: 15px;
+  width: 250px;
+  height: 320px;
+  background: #000;
+  border-radius: 10px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.6);
+  font-size: 11px;
+  color: white;
+  z-index: 1000;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  overflow: visible;
+  }
+
+  #chatHeader {
+    background: #000;
+    color: white;
+    text-align: center;
+    padding: 5px;
+    font-size: 12px;
+    font-weight: bold;
+    border-bottom: 1px solid #444;
+  }
+
+  #roleSelect { text-align: center; padding: 10px; }
+  #roleSelect button { margin: 5px; padding: 5px 10px; font-size: 11px; cursor: pointer; }
+
+  #messages {
+    flex: 1;
+    padding: 4px;
+    overflow-y: auto;
+    font-size: 10px;
+    background: #000;
+    color: white;
+  }
+
+  .msg {
+  padding: 3px 5px;
+  margin: 3px;
+  border-radius: 6px;
+  max-width: 80%;
+  position: relative;
+  font-size: 10px;
+  cursor: pointer;
+  background: #000;
+  color: white;
+  border: 1px solid #333;
+  word-wrap: break-word;
+  }
+
+  .husband {
+    margin-right: auto;
+    text-align: left;
+    border-left: 3px solid #000;
+  }
+
+  .wife {
+    margin-left: auto;
+    text-align: right;
+    border-right: 3px solid #000;
+  }
+
+  .time { font-size: 7px; color: #bbb; display: block; margin-top: 1px; }
+  .deleteBtn { background: none; border: none; color: red; font-size: 9px; cursor: pointer; position: absolute; top: 2px; }
+  .husband .deleteBtn { right: 3px; }
+  .wife .deleteBtn { left: 3px; }
+
+  .seenStatus { font-size: 8px; color: lightgreen; display: block; font-weight: 600; }
+
+  #typingIndicator {
+    font-size: 9px;
+    color: #aaa;
+    padding: 2px 6px;
+    min-height: 14px;
+    font-style: italic;
+  }
+
+  #uploadProgress {
+    display: none;
+    padding: 3px 6px;
+    background: #111;
+    border-top: 1px solid #333;
+  }
+  #uploadProgressBar {
+    height: 4px;
+    background: #444;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  #uploadProgressFill {
+    height: 100%;
+    width: 0%;
+    background: lightgreen;
+    border-radius: 2px;
+    transition: width 0.2s ease;
+  }
+  #uploadProgressText {
+    font-size: 8px;
+    color: #aaa;
+    text-align: center;
+    margin-top: 2px;
+  }
+
+  #onlineStatus {
+    font-size: 9px;
+    color: #aaa;
+    font-weight: normal;
+    display: block;
+  }
+  #onlineStatus.online { color: lightgreen; }
+  #onlineStatus.minimized { color: #f0a500; }
+
+  .replyBox {
+  font-size: 9px;
+  background: #111;
+  border-left: 3px solid #555;
+  padding: 2px 5px;
+  margin-bottom: 2px;
+  color: #eee;
+  border-radius: 3px;
+  }
+
+  .replyBox:hover {
+  background: #1e1e1e;
+  }
+
+  #replyPreview {
+    display:none;
+    font-size: 9px;
+    background: #222;
+    border-left: 3px solid #000;
+    padding: 2px 5px;
+    margin: 2px;
+    color: #eee;
+  }
+
+  #inputArea { 
+    display: flex; 
+    border-top: 1px solid #444; 
+    padding: 3px; 
+    flex-direction: column; 
+    background: #000;
+  }
+  
+  #msgInput { 
+    width: 100%;
+    padding: 3px; 
+    font-size: 10px; 
+    background: #111; 
+    color: white; 
+    outline:none; 
+    border: 1px solid #444; 
+    box-sizing: border-box;
+  }
+
+  #sendControls { 
+    display: flex; 
+    justify-content: flex-end; 
+    gap: 5px; 
+    margin-top: 3px;
+    align-items: center;
+  }
+  
+  #notifyButton {
+    background: transparent;
+    color: white;
+    border: 1px solid #333;
+    border-radius: 4px;
+    font-size: 14px;
+    width: 26px;
+    height: 22px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    margin-right: 5px;
+  }
+
+  #notifyButton:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: scale(1.05);
+  }
+
+  #notifyButton:disabled {
+    background: #666;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  #imgBtn, #vidBtn, #audioBtn, #sendBtn {
+    padding: 3px;
+    background: #000;
+    color: white;
+    border: 1px solid #333;
+    border-radius: 4px;
+    font-size: 10px;
+    width: 26px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  #sendBtn {
+    width: 45px;
+    padding: 3px 8px;
+  }
+
+  .input-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 3px;
+  }
+  
+  .left-buttons {
+    display: flex;
+    gap: 5px;
+  }
+
+  #offlineBanner {
+    display: none;
+    background: #7a1a1a;
+    color: #ffaaaa;
+    font-size: 8px;
+    text-align: center;
+    padding: 2px 4px;
+    letter-spacing: 0.3px;
+  }
+
+  /* ===== FULLSCREEN VIEWER ===== */
+  #fullscreenOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.95);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+  }
+  #fullscreenOverlay.active { display: flex; }
+  #fullscreenOverlay img {
+    max-width: 95vw;
+    max-height: 90vh;
+    object-fit: contain;
+    border-radius: 6px;
+  }
+  #fullscreenOverlay video {
+    max-width: 95vw;
+    max-height: 90vh;
+    border-radius: 6px;
+  }
+  #fullscreenClose {
+    position: absolute;
+    top: 15px;
+    right: 20px;
+    font-size: 32px;
+    color: white;
+    cursor: pointer;
+    background: none;
+    border: none;
+    line-height: 1;
+    z-index: 10000;
+  }
+  </style>
+</head>
+<body>
+  <!-- Fullscreen viewer -->
+  <div id="fullscreenOverlay">
+    <button id="fullscreenClose" onclick="closeFullscreen()">✕</button>
+    <img id="fullscreenImg" src="" style="display:none;">
+    <video id="fullscreenVid" src="" controls style="display:none;"></video>
+  </div>
+
+  <button id="chatButton">💬</button>
+  
+  <div id="chatCard">
+    <div id="chatHeader">You and I<span id="onlineStatus"></span></div>
+    <div id="offlineBanner">📡 Offline — messages will send when reconnected</div>
+    
+    <div id="roleSelect">
+      <button onclick="selectRole('husband')">Husband</button>
+      <button onclick="selectRole('wife')">Wife</button>
+    </div>
+    
+    <div id="messages" style="display:none;"></div>
+    
+    <div id="typingIndicator"></div>
+    <div id="uploadProgress">
+      <div id="uploadProgressBar"><div id="uploadProgressFill"></div></div>
+      <div id="uploadProgressText">Compressing...</div>
+    </div>
+    <div id="inputArea" style="display:none;">
+      <div id="replyPreview" style="display:none;align-items:center;justify-content:space-between;">
+        <span id="replyPreviewText"></span>
+        <button onclick="cancelReply()" style="background:none;border:none;color:#aaa;font-size:12px;cursor:pointer;padding:0 3px;line-height:1;">✕</button>
+      </div>
+      <input id="msgInput" placeholder="Type..." />
+      <div class="input-buttons">
+        <div class="left-buttons">
+          <button id="vidBtn">🎥</button>
+          <button id="imgBtn">📷</button>
+          <button id="audioBtn">🎤</button>
+        </div>
+        <button id="sendBtn">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const password = "FAMEE";
+    let userPass = "";
+    while (userPass !== password) {
+      userPass = prompt("Enter password:");
+      if (userPass === null) {
+        userPass = "";
+      } else if (userPass !== password) {
+        alert("❌ Wrong password. Try again.");
+      }
+    }
+    // Auto-show chat card after correct password
+    const card = document.getElementById("chatCard");
+    card.style.visibility = "visible";
+    card.style.opacity = "1";
+    card.style.pointerEvents = "auto";
+  </script>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+    import { getDatabase, ref, push, onChildAdded, onChildRemoved, onValue, update, remove, get, set, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDiovfWJSG8yrtz5rA-3ZvjYwmhsWj2g1A",
+      authDomain: "you-and-i-aa5ac.firebaseapp.com",
+      databaseURL: "https://you-and-i-aa5ac-default-rtdb.firebaseio.com",
+      projectId: "you-and-i-aa5ac",
+      storageBucket: "you-and-i-aa5ac.firebasestorage.app",
+      messagingSenderId: "288741214449",
+      appId: "1:288741214449:web:a32998e16e909bef674150"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const chatRef = ref(db, "chat");
+
+    let role = "";
+    let replyTo = null;
+    let typingTimer = null;
+    let messagesLoaded = false;
+    let childAddedRegistered = false;
+    let presenceRegistered = false;
+    let listenersRegistered = false;
+    let isOnline = true;
+    const seenListeners = new Set();
+
+    window.selectRole = function(r) {
+      role = r;
+      messagesLoaded = false;
+      document.getElementById("roleSelect").style.display = "none";
+      document.getElementById("messages").style.display = "block";
+      document.getElementById("inputArea").style.display = "flex";
+      document.getElementById("messages").innerHTML = "";
+
+      if (!presenceRegistered) {
+        presenceRegistered = true;
+        const connectedRef = ref(db, ".info/connected");
+
+        onValue(connectedRef, (snap) => {
+          const banner = document.getElementById('offlineBanner');
+          if (snap.val() === true) {
+            banner.style.display = 'none';
+            isOnline = true;
+            pendingKeys.forEach(key => {
+              const dot = document.getElementById("dot-" + key);
+              if (dot) dot.remove();
+              pendingKeys.delete(key);
+            });
+            const myRef = ref(db, "presence/" + role);
+            // onDisconnect uses serverTimestamp so lastSeen is always exact when tab closes
+            onDisconnect(myRef).set({ online: false, minimized: false, lastSeen: serverTimestamp() });
+            set(myRef, { online: true, minimized: false, lastSeen: Date.now() });
+            if (window._presenceInterval) clearInterval(window._presenceInterval);
+            window._presenceInterval = setInterval(() => {
+              onDisconnect(myRef).set({ online: false, minimized: false, lastSeen: serverTimestamp() });
+              update(myRef, { lastSeen: Date.now() });
+            }, 25000);
+          } else {
+            banner.style.display = 'block';
+            isOnline = false;
+          }
+        });
+
+        document.addEventListener('visibilitychange', () => {
+          const myRef = ref(db, "presence/" + role);
+          if (document.visibilityState === 'hidden') {
+            // Use update() NOT set() — set() cancels onDisconnect, update() does not
+            // Firebase connection stays alive when minimized → seen marking still works
+            update(myRef, { minimized: true, lastSeen: Date.now() });
+            // Re-register onDisconnect after any write (safety)
+            onDisconnect(myRef).set({ online: false, minimized: false, lastSeen: serverTimestamp() });
+          } else {
+            // Tab back in focus — fully active
+            update(myRef, { online: true, minimized: false, lastSeen: Date.now() });
+            onDisconnect(myRef).set({ online: false, minimized: false, lastSeen: serverTimestamp() });
+          }
+        });
+      } else {
+        const myRef = ref(db, "presence/" + role);
+        onDisconnect(myRef).set({ online: false, minimized: false, lastSeen: serverTimestamp() });
+        set(myRef, { online: true, minimized: false, lastSeen: Date.now() });
+      }
+
+      const other = role === 'husband' ? 'wife' : 'husband';
+      const otherName = role === 'husband' ? 'Wifey' : 'Hubby';
+
+      function formatLastSeen(ts) {
+        const d = new Date(ts);
+        const h = d.getHours();
+        const m = d.getMinutes().toString().padStart(2, '0');
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        const h12 = h % 12 === 0 ? 12 : h % 12;
+        const timeStr = h12 + ':' + m + ' ' + ampm;
+
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(today.getDate() - 1);
+
+        if (d.toDateString() === today.toDateString()) {
+          return otherName + " last seen " + timeStr;
+        } else if (d.toDateString() === yesterday.toDateString()) {
+          const dateStr = d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+          return otherName + " last seen " + dateStr + " " + timeStr;
+        }
+        const dateStr = d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+        return otherName + " last seen " + dateStr + " " + timeStr;
+      }
+
+      if (!listenersRegistered) {
+        listenersRegistered = true;
+
+        const otherPresenceRef = ref(db, "presence/" + other);
+        onValue(otherPresenceRef, (snap) => {
+          const data = snap.val();
+          const statusEl = document.getElementById("onlineStatus");
+          if (!data) { statusEl.textContent = ""; statusEl.className = ""; return; }
+
+          if (data.online && !data.minimized) {
+            // Fully active in the tab
+            statusEl.textContent = otherName + " is online";
+            statusEl.className = "online";
+          } else if (data.online && data.minimized) {
+            // Tab is open but minimized/backgrounded — Firebase still alive → seen works
+            statusEl.textContent = otherName + " minimized 📴";
+            statusEl.className = "minimized";
+          } else {
+            // Fully closed / disconnected
+            if (data.lastSeen) {
+              statusEl.textContent = formatLastSeen(data.lastSeen);
+            } else {
+              statusEl.textContent = otherName + " is offline";
+            }
+            statusEl.className = "";
+          }
+        });
+
+        const otherTypingRef = ref(db, "presence/" + other + "/typing");
+        onValue(otherTypingRef, (snap) => {
+          const typingEl = document.getElementById("typingIndicator");
+          typingEl.textContent = snap.val() ? otherName + " is typing..." : "";
+        });
+      }
+
+      const leftButtons = document.querySelector('.left-buttons');
+      const existingNotifyBtn = document.getElementById('notifyButton');
+      if (existingNotifyBtn && existingNotifyBtn.parentNode) {
+        existingNotifyBtn.parentNode.removeChild(existingNotifyBtn);
+      }
+
+      if (role === 'wife') {
+        const notifyBtn = document.createElement('button');
+        notifyBtn.id = 'notifyButton';
+        notifyBtn.innerHTML = '🔔';
+        notifyBtn.title = 'Notify Hubby';
+        notifyBtn.onclick = sendNotification;
+        leftButtons.insertBefore(notifyBtn, leftButtons.firstChild);
+      }
+
+      loadMessages();
+    };
+
+    function sendNotification() {
+      if (role !== 'wife') return;
+      const notifyBtn = document.getElementById('notifyButton');
+      const originalHtml = notifyBtn.innerHTML;
+      notifyBtn.innerHTML = '⏳';
+      notifyBtn.disabled = true;
+      fetch('https://api.pushover.net/1/messages.json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          token: "azq7xhc9jiz95rifgopwxhtdc72avc",
+          user: "uwe39vejxsq3moswbviuamrybk8fan",
+          title: "Wifey is Here!",
+          message: "Hubbyy i am heree",
+          sound: "pushover",
+          priority: "1",
+          url: window.location.href,
+          url_title: "Click to Open Chat"
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        setTimeout(() => { notifyBtn.innerHTML = originalHtml; notifyBtn.disabled = false; }, 2000);
+        if (data.status === 1) {
+          notifyBtn.innerHTML = '✅';
+          push(chatRef, {
+            sender: 'wife',
+            text: 'I am waiting pijj come 🥺',
+            time: getLocalTime(),
+            seenBy: {}
+          });
+        } else {
+          notifyBtn.innerHTML = '❌';
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        notifyBtn.innerHTML = '⚠️';
+        setTimeout(() => { notifyBtn.innerHTML = originalHtml; notifyBtn.disabled = false; }, 2000);
+      });
+    }
+
+    window.openFullscreenImg = function(src) {
+      const overlay = document.getElementById('fullscreenOverlay');
+      const img = document.getElementById('fullscreenImg');
+      const vid = document.getElementById('fullscreenVid');
+      vid.style.display = 'none'; vid.pause && vid.pause(); vid.src = '';
+      img.src = src;
+      img.style.display = 'block';
+      overlay.classList.add('active');
+    }
+
+    window.openFullscreenVid = function(src) {
+      const overlay = document.getElementById('fullscreenOverlay');
+      const img = document.getElementById('fullscreenImg');
+      const vid = document.getElementById('fullscreenVid');
+      img.style.display = 'none'; img.src = '';
+      vid.src = src;
+      vid.style.display = 'block';
+      overlay.classList.add('active');
+    }
+
+    window.closeFullscreen = function() {
+      const overlay = document.getElementById('fullscreenOverlay');
+      const vid = document.getElementById('fullscreenVid');
+      vid.pause && vid.pause();
+      vid.src = '';
+      document.getElementById('fullscreenImg').src = '';
+      overlay.classList.remove('active');
+    };
+
+    document.getElementById('fullscreenOverlay').addEventListener('click', function(e) {
+      if (e.target === this) closeFullscreen();
+    });
+
+    function getLocalTime() {
+      const now = new Date();
+      const h = now.getHours();
+      const m = now.getMinutes().toString().padStart(2, '0');
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const h12 = h % 12 === 0 ? 12 : h % 12;
+      return h12 + ':' + m + ' ' + ampm;
+    }
+
+    const pendingKeys = new Set();
+
+    document.getElementById("sendBtn").onclick = () => {
+      const text = document.getElementById("msgInput").value;
+      if (text.trim() === "" || !role) return;
+
+      const msgData = {
+        sender: role,
+        text: text,
+        reply: replyTo ? replyTo.text : null,
+        replySender: replyTo ? replyTo.sender : null,
+        replyKey: replyTo ? replyTo.key : null,
+        time: getLocalTime(),
+        seenBy: {}
+      };
+
+      document.getElementById("msgInput").value = "";
+      replyTo = null;
+      document.getElementById("replyPreview").style.display = "none"; document.getElementById("replyPreviewText").innerText = "";
+      if (role) set(ref(db, "presence/" + role + "/typing"), false);
+      clearTimeout(typingTimer);
+
+      const newRef = push(chatRef, msgData);
+      if (!navigator.onLine) {
+        pendingKeys.add(newRef.key);
+      }
+    };
+
+    document.getElementById("msgInput").addEventListener("keydown", function(event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        document.getElementById("sendBtn").click();
+      }
+    });
+
+    document.getElementById("msgInput").addEventListener("input", function() {
+      if (!role) return;
+      const myTypingRef = ref(db, "presence/" + role + "/typing");
+      set(myTypingRef, true);
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(() => set(myTypingRef, false), 2000);
+    });
+
+    function showProgress(text) {
+      document.getElementById("uploadProgress").style.display = "block";
+      document.getElementById("uploadProgressFill").style.width = "0%";
+      document.getElementById("uploadProgressText").textContent = text;
+      document.getElementById("imgBtn").disabled = true;
+      document.getElementById("vidBtn").disabled = true;
+      document.getElementById("audioBtn").disabled = true;
+    }
+    function setProgress(pct, text) {
+      document.getElementById("uploadProgressFill").style.width = pct + "%";
+      document.getElementById("uploadProgressText").textContent = text;
+    }
+    function hideProgress() {
+      document.getElementById("uploadProgress").style.display = "none";
+      document.getElementById("imgBtn").disabled = false;
+      document.getElementById("vidBtn").disabled = false;
+      document.getElementById("audioBtn").disabled = false;
+    }
+
+    function compressImage(file) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          let w = img.width, h = img.height;
+          const MAX = 800;
+          if (w > MAX || h > MAX) {
+            if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+            else { w = Math.round(w * MAX / h); h = MAX; }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", 0.7));
+        };
+        img.src = url;
+      });
+    }
+
+    document.getElementById("imgBtn").onclick = () => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "image/*";
+      input.onchange = async e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        showProgress("Compressing image...");
+        setProgress(20, "Compressing image...");
+        try {
+          const compressed = await compressImage(file);
+          setProgress(70, "Sending...");
+          await push(chatRef, {
+            sender: role,
+            image: compressed,
+            time: getLocalTime(),
+            seenBy: {}
+          });
+          setProgress(100, "Sent ✅");
+          setTimeout(hideProgress, 800);
+        } catch(err) {
+          hideProgress();
+          alert("Failed to send image 😕");
+        }
+      };
+      input.click();
+    };
+
+    document.getElementById("vidBtn").onclick = () => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "video/*";
+      input.onchange = e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const blobUrl = URL.createObjectURL(file);
+        const tempVid = document.createElement("video");
+        tempVid.preload = "metadata";
+        tempVid.src = blobUrl;
+        tempVid.onloadedmetadata = () => {
+          URL.revokeObjectURL(blobUrl);
+          if (tempVid.duration > 30) {
+            alert("❌ Video too long! Max 30 seconds.\nYour video: " + Math.round(tempVid.duration) + " sec.");
+            return;
+          }
+          showProgress("Reading video...");
+          const reader = new FileReader();
+          reader.onprogress = (ev) => {
+            if (ev.lengthComputable) {
+              const pct = Math.round((ev.loaded / ev.total) * 60);
+              setProgress(pct, "Reading video... " + pct + "%");
+            }
+          };
+          reader.onload = async (ev) => {
+            setProgress(70, "Sending to Firebase...");
+            try {
+              const base64 = ev.target.result;
+              const sizeKB = Math.round(base64.length * 0.75 / 1024);
+              if (sizeKB > 9000) {
+                hideProgress();
+                alert("❌ Video too large (" + Math.round(sizeKB/1024) + "MB).\nPlease use a shorter or lower quality video under ~9MB.");
+                return;
+              }
+              setProgress(85, "Saving...");
+              await push(chatRef, {
+                sender: role,
+                video: base64,
+                time: getLocalTime(),
+                seenBy: {}
+              });
+              setProgress(100, "Sent ✅");
+              setTimeout(hideProgress, 800);
+            } catch(err) {
+              hideProgress();
+              alert("Failed to send video 😕 Try a shorter clip.");
+            }
+          };
+          reader.onerror = () => { hideProgress(); alert("Could not read video file."); };
+          reader.readAsDataURL(file);
+        };
+      };
+      input.click();
+    };
+
+    let mediaRecorder;
+    let audioChunks = [];
+
+    document.getElementById("audioBtn").onclick = async () => {
+      const btn = document.getElementById("audioBtn");
+      if (!mediaRecorder || mediaRecorder.state === "inactive") {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream);
+          audioChunks = [];
+          mediaRecorder.ondataavailable = e => { audioChunks.push(e.data); };
+          mediaRecorder.onstop = () => {
+            stream.getTracks().forEach(t => t.stop());
+            const blob = new Blob(audioChunks, { type: "audio/webm" });
+            audioChunks = [];
+            showProgress("Sending voice...");
+            setProgress(40, "Sending voice...");
+            const reader = new FileReader();
+            reader.onload = async ev => {
+              setProgress(80, "Saving...");
+              try {
+                await push(chatRef, {
+                  sender: role,
+                  audio: ev.target.result,
+                  time: getLocalTime(),
+                  seenBy: {}
+                });
+                setProgress(100, "Sent ✅");
+                setTimeout(hideProgress, 800);
+              } catch(err) {
+                hideProgress();
+                alert("Failed to send voice 😕");
+              }
+            };
+            reader.readAsDataURL(blob);
+          };
+          mediaRecorder.start();
+          btn.innerText = "⏹️";
+          btn.style.color = "red";
+        } catch(err) {
+          alert("Microphone access denied 🎤");
+        }
+      } else {
+        mediaRecorder.stop();
+        btn.innerText = "🎤";
+        btn.style.color = "white";
+      }
+    };
+
+    function enableReply(key, msg) {
+      let label = msg.text || (msg.image ? "📷 Photo" : msg.video ? "🎥 Video" : msg.audio ? "🎤 Voice" : "");
+      replyTo = { key, text: label, sender: msg.sender };
+      document.getElementById("replyPreviewText").innerText = msg.sender + ": " + label;
+      document.getElementById("replyPreview").style.display = "flex";
+    }
+
+    window.cancelReply = function() {
+      replyTo = null;
+      document.getElementById("replyPreview").style.display = "none";
+      document.getElementById("replyPreviewText").innerText = "";
+    };
+
+    window.jumpToMessage = function(key) {
+      const target = document.getElementById("msg-" + key);
+      if (!target) return;
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.style.transition = "background 0.3s ease";
+      target.style.background = "#2a2a2a";
+      setTimeout(() => {
+        target.style.transition = "background 0.8s ease";
+        target.style.background = "#000";
+      }, 800);
+    }
+
+    function sanitize(str) {
+      if (!str) return "";
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function renderMsg(key, msg) {
+      if (document.getElementById("msg-" + key)) return;
+
+      const msgDiv = document.createElement("div");
+      msgDiv.className = "msg " + msg.sender;
+      msgDiv.id = "msg-" + key;
+      document.getElementById("messages").appendChild(msgDiv);
+
+      let deleteBtn = "";
+      if (msg.sender === role) {
+        deleteBtn = `<button class="deleteBtn" onclick="deleteMsg('${key}')">✖</button>`;
+      }
+
+      let content = "";
+      if (msg.reply) {
+        const jumpKey = msg.replyKey ? `onclick="jumpToMessage('${msg.replyKey}')"` : "";
+        const cursor = msg.replyKey ? `style="cursor:pointer;"` : "";
+        content += `<div class="replyBox" ${jumpKey} ${cursor}>${sanitize(msg.replySender)}: ${sanitize(msg.reply)}</div>`;
+      }
+      if (msg.text) content += sanitize(msg.text);
+      if (msg.image) content += `<br><img src="${msg.image}" width="100" style="cursor:pointer;border-radius:4px;" onclick="openFullscreenImg(this.src)">`;
+      if (msg.video) content += `<br><div style="position:relative;display:inline-block;"><video src="${msg.video}" width="150" controls style="display:block;border-radius:4px;"></video><button onclick="openFullscreenVid(this.previousElementSibling.src)" style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,0.6);color:white;border:none;border-radius:4px;font-size:10px;padding:2px 5px;cursor:pointer;">⛶</button></div>`;
+      if (msg.audio) content += `<br><audio controls src="${msg.audio}" style="width:160px;height:40px;display:block;margin-top:2px;"></audio>`;
+
+      msgDiv.innerHTML = `
+        ${content}
+        <span class="time">${msg.time || ""}${pendingKeys.has(key) ? ` <span id="dot-${key}" style="color:#f90;font-size:8px;">•</span>` : ''}</span>
+        ${deleteBtn}
+        ${msg.sender === role ? `<span class="seenStatus" id="seen-${key}"></span>` : ''}
+      `;
+
+      if (msg.sender === role && !seenListeners.has(key)) {
+        seenListeners.add(key);
+        onValue(ref(db, "chat/" + key + "/seenBy"), (snap) => {
+          const seenBy = snap.val();
+          const opposite = role === 'husband' ? 'wife' : 'husband';
+          const seenEl = document.getElementById("seen-" + key);
+          if (seenEl) seenEl.textContent = (seenBy && seenBy[opposite]) ? "✓" : "";
+        });
+      }
+
+      msgDiv.addEventListener("touchstart", function(e) {
+        this.touchStartX = e.changedTouches[0].screenX;
+      });
+      msgDiv.addEventListener("touchend", function(e) {
+        if (this.touchStartX - e.changedTouches[0].screenX > 50) enableReply(key, msg);
+      });
+      msgDiv.ondblclick = () => enableReply(key, msg);
+
+      document.getElementById("messages").scrollTop = document.getElementById("messages").scrollHeight;
+    }
+
+    async function loadMessages() {
+      if (childAddedRegistered) return;
+      childAddedRegistered = true;
+
+      const snapshot = await get(chatRef);
+      if (snapshot.exists()) {
+        snapshot.forEach((child) => {
+          renderMsg(child.key, child.val());
+          if (child.val().sender !== role) {
+            update(ref(db, "chat/" + child.key), { ["seenBy/" + role]: true });
+          }
+        });
+      }
+      messagesLoaded = true;
+
+      onChildAdded(chatRef, (snap) => {
+        if (!messagesLoaded) return;
+        const key = snap.key;
+        const msg = snap.val();
+        if (!document.getElementById("msg-" + key)) {
+          renderMsg(key, msg);
+          if (msg.sender !== role) {
+            update(ref(db, "chat/" + key), { ["seenBy/" + role]: true });
+          }
+        }
+      });
+    }
+
+    window.deleteMsg = function(key) {
+      remove(ref(db, "chat/" + key));
+    };
+
+    onChildRemoved(chatRef, (snapshot) => {
+      const msgDiv = document.getElementById("msg-" + snapshot.key);
+      if (msgDiv) msgDiv.remove();
+    });
+
+    document.getElementById("chatButton").onclick = () => {
+      const card = document.getElementById("chatCard");
+      const isHidden = card.style.visibility === "hidden" || card.style.visibility === "";
+      card.style.visibility = isHidden ? "visible" : "hidden";
+      card.style.opacity = isHidden ? "1" : "0";
+      card.style.pointerEvents = isHidden ? "auto" : "none";
+    };
+
+  </script>
+</body>
+</html>
